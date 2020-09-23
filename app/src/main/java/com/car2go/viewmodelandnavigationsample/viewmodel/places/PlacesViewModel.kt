@@ -3,36 +3,38 @@ package com.car2go.viewmodelandnavigationsample.viewmodel.places
 import android.os.Parcelable
 import androidx.hilt.Assisted
 import androidx.hilt.lifecycle.ViewModelInject
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.LiveData
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.asFlow
+import androidx.lifecycle.viewModelScope
 import com.car2go.viewmodelandnavigationsample.data.FavoritePlacesStorage
+import com.car2go.viewmodelandnavigationsample.data.SettingsStorage
 import com.car2go.viewmodelandnavigationsample.model.Place
-import com.car2go.viewmodelandnavigationsample.util.asObservable
 import com.car2go.viewmodelandnavigationsample.viewmodel.StateViewModel
-import com.jakewharton.rxrelay3.PublishRelay
-import io.reactivex.rxjava3.core.Observable
-import io.reactivex.rxjava3.core.Observable.merge
-import io.reactivex.rxjava3.kotlin.Observables.combineLatest
 import kotlinx.android.parcel.Parcelize
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.BroadcastChannel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 
+@ExperimentalCoroutinesApi
 class PlacesViewModel @ViewModelInject constructor(
     private val favoritePlacesStorage: FavoritePlacesStorage,
+    private val settingsStorage: SettingsStorage,
     @Assisted savedStateHandle: SavedStateHandle
 ): StateViewModel<PlacesViewState>() {
 
     override val mutableState = savedStateHandle.getLiveData<PlacesViewState>("PlacesViewModel.state")
     private val newPlaceData = savedStateHandle.getLiveData<NewPlaceData>("PlacesViewModel.newPlaceData")
 
-    private val shouldEditRelay = PublishRelay.create<Unit>()
-    private val shouldCancelRelay = PublishRelay.create<Unit>()
-    private val shouldAddPlaceRelay = PublishRelay.create<Unit>()
+    private val shouldEditChannel = BroadcastChannel<Unit>(1)
+    private val shouldCancelChannel = BroadcastChannel<Unit>(1)
+    private val shouldAddPlaceChannel = BroadcastChannel<Unit>(1)
 
     override fun doOnStart() {
         super.doOnStart()
 
         if (mutableState.value == null) {
-            mutableState.postValue(initialState())
+            mutableState.postValue(PlacesViewState())
         }
 
         if (newPlaceData.value == null) {
@@ -41,15 +43,21 @@ class PlacesViewModel @ViewModelInject constructor(
     }
 
     fun startEditing() {
-        shouldEditRelay.accept(Unit)
+        viewModelScope.launch {
+            shouldEditChannel.send(Unit)
+        }
     }
 
     fun cancelEditing() {
-        shouldCancelRelay.accept(Unit)
+        viewModelScope.launch {
+            shouldCancelChannel.send(Unit)
+        }
     }
 
     fun addNewPlace() {
-        shouldAddPlaceRelay.accept(Unit)
+        viewModelScope.launch {
+            shouldAddPlaceChannel.send(Unit)
+        }
     }
 
     fun setLatitude(latitude: Double?) {
@@ -70,15 +78,16 @@ class PlacesViewModel @ViewModelInject constructor(
         }
     }
 
-    override fun stateObservable(lifecycleOwner: LifecycleOwner): Observable<PlacesViewState> {
-        return combineLatest(
-            isEditingObservable(lifecycleOwner),
-            favoritePlacesStorage.observePlaces(),
-            newPlaceData.asObservable(lifecycleOwner)
-        ) { isEditing, places, newPlaceData ->
+    override fun stateFlow(): Flow<PlacesViewState> {
+        return combine(
+            isEditingFlow(),
+            favoritePlacesStorage.placesFlow(),
+            settingsStorage.sortByNameDescendingFlow(),
+            newPlaceData.asFlow()
+        ) { isEditing, places, sortByNameDescending, newPlaceData ->
             PlacesViewState(
                 editing = isEditing,
-                places = places,
+                places = places.sorted(sortByNameDescending),
                 latitude = newPlaceData.latitude,
                 longitude = newPlaceData.longitude,
                 name = newPlaceData.name,
@@ -87,28 +96,29 @@ class PlacesViewModel @ViewModelInject constructor(
         }
     }
 
-    private fun isEditingObservable(lifecycleOwner: LifecycleOwner): Observable<Boolean> {
+    private fun isEditingFlow(): Flow<Boolean> {
         return merge(
-            shouldCancelObservable(),
-            shouldEditObservable(),
-            addPlaceObservable(lifecycleOwner)
+            shouldCancelFlow(),
+            shouldEditFlow(),
+            addPlaceFlow()
         )
-            .startWith(Observable.fromCallable {
-                mutableState.value?.editing ?: false
-            })
-            .doOnNext {
+            .onStart {
+                emit(mutableState.value?.editing ?: false)
+            }
+            .onEach {
                 if (!it) {
                     newPlaceData.postValue(NewPlaceData())
                 }
             }
     }
 
-    private fun addPlaceObservable(lifecycleOwner: LifecycleOwner): Observable<Boolean> {
-        return shouldAddPlaceRelay
-            .switchMap {
-                combineLatest(
-                    mutableState.asObservable(lifecycleOwner).map { it.places },
-                    newPlaceData.asObservable(lifecycleOwner).filter { it.isComplete }
+    private fun addPlaceFlow(): Flow<Boolean> {
+        return shouldAddPlaceChannel
+            .asFlow()
+            .flatMapLatest {
+                combine(
+                    mutableState.asFlow().map { it.places },
+                    newPlaceData.asFlow().filter { it.isComplete }
                 ) { places, newPlaceData ->
                     places + Place(
                         name = newPlaceData.name!!,
@@ -118,35 +128,26 @@ class PlacesViewModel @ViewModelInject constructor(
                 }
                     .take(1)
             }
-            .doOnNext {
+            .onEach {
                 favoritePlacesStorage.save(it)
             }
             .map { false }
     }
 
-    private fun shouldEditObservable(): Observable<Boolean> {
-        return shouldEditRelay
+    private fun shouldEditFlow(): Flow<Boolean> {
+        return shouldEditChannel
+            .asFlow()
             .map {
                 true
             }
     }
 
-    private fun shouldCancelObservable(): Observable<Boolean> {
-        return shouldCancelRelay
+    private fun shouldCancelFlow(): Flow<Boolean> {
+        return shouldCancelChannel
+            .asFlow()
             .map {
                 false
             }
-    }
-
-    private fun initialState(): PlacesViewState {
-        return PlacesViewState(
-            editing = false,
-            places = favoritePlacesStorage.load() ?: emptyList(),
-            latitude = null,
-            longitude = null,
-            name = null,
-            canSave = false
-        )
     }
 
     @Parcelize
@@ -161,6 +162,14 @@ class PlacesViewModel @ViewModelInject constructor(
                 return !name.isNullOrEmpty() && latitude != null && longitude != null
             }
 
+    }
+
+    private companion object {
+        fun List<Place>.sorted(byNameDescending: Boolean) = if (byNameDescending) {
+            sortedByDescending { it.name }
+        } else {
+            sortedBy { it.name }
+        }
     }
 
 }

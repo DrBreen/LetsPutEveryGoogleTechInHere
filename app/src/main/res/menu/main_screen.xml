@@ -15,4 +15,10 @@
         android:title="@string/start_editing"
         android:visible="false"/>
 
+    <item
+        android:id="@+id/settings"
+        android:icon="@drawable/ic_baseline_settings_24"
+        app:showAsAction="always"
+        android:title="@string/settings"/>
+
 </menu>

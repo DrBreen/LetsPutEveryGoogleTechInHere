@@ -6,10 +6,10 @@ import kotlinx.android.parcel.Parcelize
 
 @Parcelize
 data class PlacesViewState(
-    val editing: Boolean,
-    val places: List<Place>,
-    val latitude: Double?,
-    val longitude: Double?,
-    val name: String?,
-    val canSave: Boolean
+    val editing: Boolean = false,
+    val places: List<Place> = emptyList(),
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val name: String? = null,
+    val canSave: Boolean = false
 ): Parcelable

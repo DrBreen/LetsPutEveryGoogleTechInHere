@@ -1,4 +1,4 @@
-package com.car2go.viewmodelandnavigationsample.view.main
+package com.car2go.viewmodelandnavigationsample.view.places
 
 import android.view.LayoutInflater
 import android.view.View

@@ -6,7 +6,10 @@ import com.car2go.viewmodelandnavigationsample.model.Place
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
-import io.reactivex.rxjava3.core.Observable
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
 
 class FavoritePlacesStorage @Inject constructor(
@@ -21,29 +24,29 @@ class FavoritePlacesStorage @Inject constructor(
         ))
     }
 
-    fun load(): List<Place> {
+    private fun load(): List<Place> {
         return sharedPreferences.getString(KEY, null)?.let {
             adapter.fromJson(it)
         } ?: emptyList()
     }
 
-    fun observePlaces(): Observable<List<Place>> {
-        return Observable.create { emitter ->
+    @ExperimentalCoroutinesApi
+    fun placesFlow(): Flow<List<Place>> {
+        return callbackFlow {
 
-            emitter.onNext(load())
+            offer(load())
 
             val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
                 if (key != KEY) return@OnSharedPreferenceChangeListener
 
-                emitter.onNext(load())
+                offer(load())
             }
 
             sharedPreferences.registerOnSharedPreferenceChangeListener(listener)
 
-            emitter.setCancellable {
+            awaitClose {
                 sharedPreferences.unregisterOnSharedPreferenceChangeListener(listener)
             }
-
         }
     }
 

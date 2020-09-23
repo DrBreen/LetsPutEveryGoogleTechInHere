@@ -1,11 +1,13 @@
 package com.car2go.viewmodelandnavigationsample.viewmodel
 
-import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import io.reactivex.rxjava3.core.Observable
-import io.reactivex.rxjava3.disposables.Disposable
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 abstract class StateViewModel<State>: ViewModel() {
 
@@ -13,26 +15,18 @@ abstract class StateViewModel<State>: ViewModel() {
         get() = mutableState
 
     protected abstract val mutableState: MutableLiveData<State>
-    abstract fun stateObservable(lifecycleOwner: LifecycleOwner): Observable<State>
-    open fun doOnStart() {}
 
-    private var disposable: Disposable? = null
+    protected abstract fun stateFlow(): Flow<State>
 
-    fun start(lifecycleOwner: LifecycleOwner) {
-        disposable?.dispose()
+    protected open fun doOnStart() {}
 
-        disposable = stateObservable(lifecycleOwner).subscribe {
-            mutableState.postValue(it)
+    fun start() {
+        doOnStart()
+
+        viewModelScope.launch {
+            stateFlow().collect {
+                mutableState.postValue(it)
+            }
         }
     }
-
-    override fun onCleared() {
-        super.onCleared()
-
-        disposable?.dispose()
-        disposable = null
-    }
-
-
-
 }
